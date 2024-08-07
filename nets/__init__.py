@@ -1,1 +1,2 @@
 from .equiformer_v2.equiformer_v2_oc20 import EquiformerV2_OC20
+from .equiformer_v2.equiformer_v2_pcd import EquiformerV2_PCD
