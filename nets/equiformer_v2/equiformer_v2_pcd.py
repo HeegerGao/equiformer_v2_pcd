@@ -96,10 +96,8 @@ class EquiformerV2_PCD(BaseModel):
         input_types=[0, 1],
         input_channels=[3, 1],
         max_output_channels=3,
-
         max_neighbors=64,
-        max_radius=0.1,
-
+        max_radius=1.0,
         num_layers=4,
         sphere_channels=128,
         attn_hidden_channels=128,
@@ -108,14 +106,12 @@ class EquiformerV2_PCD(BaseModel):
         attn_value_channels=16,
         ffn_hidden_channels=512,
         edge_channels=128,
-        
         lmax_list=[4],
         mmax_list=[3],
 
         norm_type='rms_norm_sh',
         grid_resolution=None, 
         num_sphere_samples=128,
-
         use_atom_edge_embedding=True, 
         share_atom_edge_embedding=False,
         use_m_share_rad=False,
@@ -277,7 +273,7 @@ class EquiformerV2_PCD(BaseModel):
                 self.SO3_rotation,
                 self.mappingReduced,
                 self.SO3_grid,
-                self.max_num_elements,
+                self.input_channels[0],
                 self.edge_channels_list,
                 self.block_use_atom_edge_embedding,
                 self.use_m_share_rad,
@@ -310,7 +306,7 @@ class EquiformerV2_PCD(BaseModel):
                 self.SO3_rotation, 
                 self.mappingReduced, 
                 self.SO3_grid, 
-                self.max_num_elements,
+                self.input_channels[0],
                 self.edge_channels_list,
                 self.block_use_atom_edge_embedding, 
                 self.use_m_share_rad,
@@ -325,19 +321,21 @@ class EquiformerV2_PCD(BaseModel):
         self.apply(self._init_weights)
         self.apply(self._uniform_init_rad_func_linear_weights)
 
+        self.use_pbc = False
+        self.otf_graph = True
 
-    @conditional_grad(torch.enable_grad())
+    @torch.enable_grad()    # TODO: here I enable grad for the forwrad pass every time. Originally it has a condition for the force prediction
     def forward(self, data):
         ''' In GNNs, there is no batch axis. All graphs are concatenated into a single graph.
             So the first dim is the number of nodes in the concatenated graph.
         '''
         
-        self.batch_size = len(data.natoms)
+        self.batch_size = data.batch[-1]
         self.dtype = data.pos.dtype
         self.device = data.pos.device
 
-        num_pcds = len(data.pcds)   # data.pcds is the concatenated point cloud data
-        input_feature = data.input_feature  # should be in the shape of [num_pcds, feature_dim]
+        num_pcds = len(data.pos)   # data.pcds is the concatenated point cloud data
+        input_feature = data.feature  # should be in the shape of [num_pcds, feature_dim]
         inv_feature = input_feature[:, :self.input_channels[0]]
 
         (
@@ -407,14 +405,14 @@ class EquiformerV2_PCD(BaseModel):
             edge_index)
 
         # replace part of the edge_degree embedding with the given input high order degree features
-        input_feature_index = 1
+        input_feature_index = self.input_channels[0]
         for i in range(1, len(self.input_types)):
             # go to the type_i part of the edge_degree embedding
             current_begin_index = (self.input_types[i] - 1 + 1) ** 2
             current_type_i_length = 2*self.input_types[i] + 1
 
             edge_degree.embedding[:, current_begin_index:current_begin_index+current_type_i_length, :self.input_channels[i]] = \
-                input_feature[:, input_feature_index:input_feature_index+current_type_i_length*self.input_channels[i]]
+                input_feature[:, input_feature_index:input_feature_index+current_type_i_length*self.input_channels[i]].reshape(-1, self.input_channels[i], current_type_i_length).transpose(1,2)    # [num_pcds, 2l+1, edge_channels]
 
             input_feature_index += current_type_i_length*self.input_channels[i]
 
@@ -447,11 +445,17 @@ class EquiformerV2_PCD(BaseModel):
         # Modify this part to fit your predictions
         # Here I predict one type-0 feature and three type-1 features
 
-        heatmap = output.embedding.narrow(1, 0, 1)  # means extract the first dim, from 0, length 1
-        heatmap = heatmap.reshape(-1, data.pcd_per_scene)
-        heatmap = torch.nn.functional.softmax(heatmap, dim=1)
+        heatmap = output.embedding.narrow(1, 0, 1).squeeze(1)  # means extract the first dim, from 0, length 1. should be in the shape of [num_pcd, output_channel]
+        heatmap = heatmap.mean(dim=1).unsqueeze(1)  # means average over the 2nd dim, and then unsqueeze to make it in the shape of [num_pcd, 1]
+        # normalize with softmax
+        start = 0
+        for i in range(len(data.graph_pcd_num)):
+            heatmap_i = heatmap[start:start+data.graph_pcd_num[i]]
+            heatmap[start:start+data.graph_pcd_num[i]] = torch.nn.functional.softmax(heatmap_i, dim=1)
+            start += data.graph_pcd_num[i]
 
-        orientation = output.embedding.narrow(1, 1, 9)  # means extract the first dim, from 1, length 9
+        orientation = output.embedding.narrow(1, 1, 3).transpose(1,2)  # means extract the first dim, from 1, length 9. The original result's last dim is the channel, so we have to transpose it.
+        orientation = orientation.reshape(-1, 9)  # reshape to [num_pcd, 9]
         for i in range(3):
             orientation[:, 3*i:3*(i+1)] /= (torch.norm(orientation[:, 3*i:3*(i+1)].clone(), dim=1).unsqueeze(1) + 1e-8)
 

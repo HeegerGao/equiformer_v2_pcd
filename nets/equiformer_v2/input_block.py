@@ -158,7 +158,7 @@ class EdgeDegreeEmbeddingPCD(torch.nn.Module):
         
         rescale_factor
     ):
-        super(EdgeDegreeEmbedding, self).__init__()
+        super(EdgeDegreeEmbeddingPCD, self).__init__()
         self.sphere_channels = sphere_channels
         self.lmax_list = lmax_list
         self.mmax_list = mmax_list

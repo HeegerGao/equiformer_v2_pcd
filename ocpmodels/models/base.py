@@ -13,6 +13,7 @@ from torch_geometric.nn import radius_graph
 
 from ocpmodels.common.utils import (
     compute_neighbors,
+    compute_neighbors_pcd,
     conditional_grad,
     get_pbc_distances,
     radius_graph_pbc,
@@ -84,6 +85,7 @@ class BaseModel(nn.Module):
                     batch=data.batch,
                     max_num_neighbors=max_neighbors,
                 )
+                assert edge_index.shape[0] > 0, "No edges found in the graph! You should increase the cutoff distance."
 
             j, i = edge_index
             distance_vec = data.pos[j] - data.pos[i]
@@ -95,7 +97,12 @@ class BaseModel(nn.Module):
             cell_offset_distances = torch.zeros_like(
                 cell_offsets, device=data.pos.device
             )
-            neighbors = compute_neighbors(data, edge_index)
+            if hasattr(data, 'natoms'):
+                neighbors = compute_neighbors(data, edge_index)
+            elif hasattr(data, 'graph_pcd_num'):
+                neighbors = compute_neighbors_pcd(data, edge_index)
+            else:
+                raise ValueError("Data object does not have natoms or graph_pcd_num")
 
         return (
             edge_index,
