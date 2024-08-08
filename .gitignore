@@ -163,3 +163,7 @@ cython_debug/
 
 *.npz
 *.npy
+pcd/
+place_pcd/
+test_pcd.py
+train.py

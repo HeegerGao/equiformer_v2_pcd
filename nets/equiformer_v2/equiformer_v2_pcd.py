@@ -107,7 +107,7 @@ class EquiformerV2_PCD(BaseModel):
         ffn_hidden_channels=512,
         edge_channels=128,
         lmax_list=[4],
-        mmax_list=[3],
+        mmax_list=[4],
 
         norm_type='rms_norm_sh',
         grid_resolution=None, 
@@ -126,8 +126,8 @@ class EquiformerV2_PCD(BaseModel):
         use_grid_mlp=False, 
         use_sep_s2_act=True,
 
-        alpha_drop=0.1,
-        drop_path_rate=0.05, 
+        alpha_drop=0.0,
+        drop_path_rate=0.0, 
         proj_drop=0.0, 
 
         weight_init='normal'
@@ -403,18 +403,19 @@ class EquiformerV2_PCD(BaseModel):
             inv_feature,
             edge_distance,
             edge_index)
-
+        
         # replace part of the edge_degree embedding with the given input high order degree features
-        input_feature_index = self.input_channels[0]
-        for i in range(1, len(self.input_types)):
-            # go to the type_i part of the edge_degree embedding
-            current_begin_index = (self.input_types[i] - 1 + 1) ** 2
-            current_type_i_length = 2*self.input_types[i] + 1
+        if len(self.input_types) > 1:
+            input_feature_index = self.input_channels[0]
+            for i in range(1, len(self.input_types)):
+                # go to the type_i part of the edge_degree embedding
+                current_begin_index = (self.input_types[i] - 1 + 1) ** 2
+                current_type_i_length = 2*self.input_types[i] + 1
 
-            edge_degree.embedding[:, current_begin_index:current_begin_index+current_type_i_length, :self.input_channels[i]] = \
-                input_feature[:, input_feature_index:input_feature_index+current_type_i_length*self.input_channels[i]].reshape(-1, self.input_channels[i], current_type_i_length).transpose(1,2)    # [num_pcds, 2l+1, edge_channels]
+                edge_degree.embedding[:, current_begin_index:current_begin_index+current_type_i_length, :self.input_channels[i]] = \
+                    input_feature[:, input_feature_index:input_feature_index+current_type_i_length*self.input_channels[i]].reshape(-1, self.input_channels[i], current_type_i_length).transpose(1,2)    # [num_pcds, 2l+1, edge_channels]
 
-            input_feature_index += current_type_i_length*self.input_channels[i]
+                input_feature_index += current_type_i_length*self.input_channels[i]
 
         x.embedding = x.embedding + edge_degree.embedding
 
@@ -430,6 +431,7 @@ class EquiformerV2_PCD(BaseModel):
                 edge_index,
                 batch=data.batch    # for GraphDropPath
             )
+            # print(torch.mean(torch.abs(x.embedding[:6] - x.embedding[6:12])))
 
         # Final layer norm
         x.embedding = self.norm(x.embedding)

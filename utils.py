@@ -33,7 +33,7 @@ def test_equivariance(model, data, device="cuda:7"):
         data_copy = deepcopy(data)
         rotation_matrix = generate_random_rotation_matrix(device)
         data_copy.pos = rotate_point_cloud(data_copy.pos, rotation_matrix)
-        data_copy.feature[:, 3:] = rotate_point_cloud(data_copy.feature[:, 3:], rotation_matrix)
+        # data_copy.feature[:, 3:] = rotate_point_cloud(data_copy.feature[:, 3:], rotation_matrix)
         rotated_heatmap, rotated_orientation = model(data_copy)
         rotated_heatmap, rotated_orientation = rotated_heatmap.detach().cpu(), rotated_orientation.detach().cpu()
 
@@ -41,8 +41,10 @@ def test_equivariance(model, data, device="cuda:7"):
         translation_invariance_orientation = torch.allclose(orientation, trasnlated_orientation, atol=1e-5)
         print("Translation Invariance (Heatmap):", translation_invariance_heatmap)
         print("Translation Invariance (Orientation):", translation_invariance_orientation)
+        print("Translational Error for Orientation:", torch.mean(torch.abs(orientation - trasnlated_orientation)))
 
         rotation_invariance = torch.allclose(heatmap, rotated_heatmap, atol=1e-5)
         rotation_equivariance = torch.allclose(rotate_point_cloud(orientation.reshape(-1, 3), rotation_matrix.detach().cpu()), rotated_orientation.reshape(-1, 3), atol=1e-5)
         print("Rotation Invariance:", rotation_invariance)
         print("Rotation Equivariance:", rotation_equivariance)
+        print("Rotation Error for Orientation:", torch.mean(torch.abs(rotate_point_cloud(orientation.reshape(-1, 3), rotation_matrix.detach().cpu()) - rotated_orientation.reshape(-1, 3))))
